@@ -10,8 +10,7 @@
                 "-S",
                 "${workspaceFolder}",
                 "-B",
-                "${workspaceFolder}/build",
-                "-DDMOD_DIR=${input:dmodDir}"
+                "${workspaceFolder}/build"
             ],
             "group": "build",
             "options": {
