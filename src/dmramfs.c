@@ -4,6 +4,7 @@
 #include "dmramfs.h"
 #include "dmfsi.h"
 #include "dmlist.h"
+#include <string.h>
 
 /** 
  * @brief Magic number for RAMFS context validation
@@ -1266,7 +1267,8 @@ static file_t* create_file(dir_t* dir, dmfsi_path_t* path)
         if(dmlist_insert(dir->files, 0, file) != 0)
         {
             DMOD_LOG_ERROR("dmramfs: Failed to insert new file '%s' into directory\n", path->filename);
-            Dmod_Free(file->file_name);
+            if (file->handles) dmlist_destroy(file->handles);
+            if (file->file_name) Dmod_Free(file->file_name);
             Dmod_Free(file);
             return NULL;
         }
@@ -1426,9 +1428,9 @@ static dir_t* create_dir(dir_t* parent, dmfsi_path_t* path)
         if (dmlist_insert(parent->dirs, 0, new_dir) != 0)
         {
             DMOD_LOG_ERROR("dmramfs: Failed to insert directory '%s' into parent\n", name);
-            Dmod_Free(new_dir->dir_name);
-            dmlist_destroy(new_dir->files);
-            dmlist_destroy(new_dir->dirs);
+            if (new_dir->dir_name) Dmod_Free(new_dir->dir_name);
+            if (new_dir->files) dmlist_destroy(new_dir->files);
+            if (new_dir->dirs) dmlist_destroy(new_dir->dirs);
             Dmod_Free(new_dir);
             return NULL;
         }
