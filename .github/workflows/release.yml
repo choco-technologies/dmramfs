@@ -64,7 +64,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
       
-      - name: Build dmffs for ${{ matrix.arch_name }}
+      - name: Build dmramfs for ${{ matrix.arch_name }}
         run: |
           set -e
           ARCH_DIR_NAME=$(echo "${{ matrix.arch_name }}" | sed 's|/|-|')
@@ -91,20 +91,12 @@ jobs:
           DMF_DIR="$BUILD_DIR/dmf"
           DMFC_DIR="$BUILD_DIR/dmfc"
           
-          cp $DMF_DIR/dmffs.dmf release_package/
-          cp $DMF_DIR/dmffs_version.txt release_package/
-          cp $DMFC_DIR/dmffs.dmfc release_package/
+          cp $DMF_DIR/dmramfs.dmf release_package/
+          cp $DMF_DIR/dmramfs_version.txt release_package/
+          cp $DMFC_DIR/dmramfs.dmfc release_package/
           # Copy .dmd file if it exists
-          if [ -f $DMF_DIR/dmffs.dmd ]; then
-            cp $DMF_DIR/dmffs.dmd release_package/
-          fi
-
-          cp $DMF_DIR/make_dmffs.dmf release_package/
-          cp $DMF_DIR/make_dmffs_version.txt release_package/
-          cp $DMFC_DIR/make_dmffs.dmfc release_package/
-          # Copy .dmd file if it exists
-          if [ -f $DMF_DIR/make_dmffs.dmd ]; then
-            cp $DMF_DIR/make_dmffs.dmd release_package/
+          if [ -f $DMF_DIR/dmramfs.dmd ]; then
+            cp $DMF_DIR/dmramfs.dmd release_package/
           fi
                     
           # Copy documentation and license
@@ -120,16 +112,16 @@ jobs:
       - name: Create release archive
         run: |
           cd release_package
-          zip -r ../dmffs-${{ github.event.release.tag_name }}-$ARCH_DIR_NAME.zip .
+          zip -r ../dmramfs-${{ github.event.release.tag_name }}-$ARCH_DIR_NAME.zip .
           cd ..
           echo "Created archive:"
-          ls -lh dmffs-*.zip
+          ls -lh dmramfs-*.zip
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: dmffs-${{ github.event.release.tag_name }}-*.zip
+          path: dmramfs-${{ github.event.release.tag_name }}-*.zip
           retention-days: 1
 
   generate-versions-manifest:
@@ -148,7 +140,7 @@ jobs:
       - name: Generate versions.dmm
         run: |
           set -e
-          echo "# List of available versions for dmffs modules" > versions.dmm
+          echo "# List of available versions for dmramfs modules" > versions.dmm
           echo "# Generated automatically by CI" >> versions.dmm
           echo "" >> versions.dmm
           
@@ -166,9 +158,8 @@ jobs:
           
           echo "Found versions: $VERSIONS"
           
-          # Add $version-available directives for both modules
-          echo "\$version-available dmffs $VERSIONS" >> versions.dmm
-          echo "\$version-available make_dmffs $VERSIONS" >> versions.dmm
+          # Add $version-available directives for the module
+          echo "\$version-available dmramfs $VERSIONS" >> versions.dmm
           
           echo "Generated versions.dmm:"
           cat versions.dmm
