@@ -1,2 +1,0 @@
-dmod 1.0 0e272cb
-dmramfs 0.1 0e272cb
