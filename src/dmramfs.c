@@ -1200,6 +1200,12 @@ static file_t* find_file(dir_t* dir, dmfsi_path_t* path)
     }
     else if(path->directory != NULL)
     {
+        // Handle empty directory (root path like /file.txt)
+        if (strlen(path->directory) == 0 && path->next != NULL)
+        {
+            return find_file(dir, path->next);
+        }
+        
         dir_t* subdir = dmlist_find(dir->dirs, path->directory, compare_dir_name);
         if(subdir != NULL && path->next != NULL)
         {
@@ -1224,6 +1230,12 @@ static dir_t* find_dir(dir_t* dir, dmfsi_path_t* path)
     if (name == NULL)
     {
         return NULL;
+    }
+    
+    // Handle empty directory (root path)
+    if (strlen(name) == 0 && path->next != NULL)
+    {
+        return find_dir(dir, path->next);
     }
 
     dir_t* subdir = dmlist_find(dir->dirs, name, compare_dir_name);
@@ -1264,7 +1276,7 @@ static file_t* create_file(dir_t* dir, dmfsi_path_t* path)
         file->data = NULL;
         file->size = 0;
         file->handles = dmlist_create(DMOD_MODULE_NAME);
-        if(dmlist_insert(dir->files, 0, file) != 0)
+        if(!dmlist_insert(dir->files, 0, file))
         {
             DMOD_LOG_ERROR("dmramfs: Failed to insert new file '%s' into directory\n", path->filename);
             if (file->handles) dmlist_destroy(file->handles);
@@ -1276,6 +1288,12 @@ static file_t* create_file(dir_t* dir, dmfsi_path_t* path)
     }
     else if(path->directory != NULL)
     {
+        // Handle empty directory (root path like /file.txt)
+        if (strlen(path->directory) == 0 && path->next != NULL)
+        {
+            return create_file(dir, path->next);
+        }
+        
         dir_t* subdir = dmlist_find(dir->dirs, path->directory, compare_dir_name);
         if(subdir == NULL)
         {
@@ -1392,6 +1410,12 @@ static dir_t* create_dir(dir_t* parent, dmfsi_path_t* path)
     {
         return NULL;
     }
+    
+    // Handle empty directory (root path)
+    if (strlen(name) == 0 && path->next != NULL)
+    {
+        return create_dir(parent, path->next);
+    }
 
     // Check if it's the final component
     if (path->filename != NULL || path->next == NULL)
@@ -1425,7 +1449,7 @@ static dir_t* create_dir(dir_t* parent, dmfsi_path_t* path)
             return NULL;
         }
 
-        if (dmlist_insert(parent->dirs, 0, new_dir) != 0)
+        if (!dmlist_insert(parent->dirs, 0, new_dir))
         {
             DMOD_LOG_ERROR("dmramfs: Failed to insert directory '%s' into parent\n", name);
             if (new_dir->dir_name) Dmod_Free(new_dir->dir_name);
@@ -1454,7 +1478,7 @@ static dir_t* create_dir(dir_t* parent, dmfsi_path_t* path)
             subdir->files = dmlist_create(DMOD_MODULE_NAME);
             subdir->dirs = dmlist_create(DMOD_MODULE_NAME);
 
-            if (dmlist_insert(parent->dirs, 0, subdir) != 0)
+            if (!dmlist_insert(parent->dirs, 0, subdir))
             {
                 if (subdir->dir_name) Dmod_Free(subdir->dir_name);
                 if (subdir->files) dmlist_destroy(subdir->files);
