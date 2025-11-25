@@ -14,6 +14,11 @@ DMOD RAM File System - an in-memory file system module for the DMOD framework.
 - **File Management**: Rename, delete, and get file statistics
 - **DMFSI Compliant**: Implements the standard DMOD file system interface
 
+## Dependencies
+
+This module requires the following system libraries:
+- **dmlist** - DMOD linked list library (fetched automatically via CMake FetchContent)
+
 ## Building
 
 ```bash
@@ -91,6 +96,10 @@ cmake --build .
 # Run tests against dmramfs
 ./tests/fs_tester /path/to/dmramfs.dmf
 ```
+
+## Known Issues
+
+When running `fs_tester`, you may see `[ERROR] Failed to close file` messages even though tests pass. This is due to a return value convention mismatch in the dmvfs layer (which expects boolean success/failure) versus the DMFSI interface convention (which uses 0 for success). The actual file operations work correctly despite these messages.
 
 ## License
 
