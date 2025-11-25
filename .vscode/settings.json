@@ -1,5 +1,10 @@
 {
     "files.associations": {
-        "dmfsi.h": "c"
-    }
+        "dmfsi.h": "c",
+        "dmod.h": "c",
+        "dmlist.h": "c"
+    },
+    "C_Cpp.default.defines": [
+        "DMOD_MODULE_NAME=\"dmramfs\""
+    ]
 }

@@ -3,7 +3,68 @@
 #include "dmod.h"
 #include "dmramfs.h"
 #include "dmfsi.h"
+#include "dmlist.h"
 
+/** 
+ * @brief Magic number for RAMFS context validation
+ */
+#define DMRAMFS_CONTEXT_MAGIC 0x52414D46  // 'RAMF'
+
+/** 
+ * @brief File structure
+ */
+typedef struct 
+{
+    char* file_name;
+    void* data;
+    size_t size;
+    dmlist_context_t* handles;
+} file_t;
+
+/** 
+ * @brief File handle structure
+ */
+typedef struct 
+{
+    file_t* file;
+    int mode;
+    int attribute;
+} file_handle_t;
+
+/** 
+ * @brief Directory structure
+ */
+typedef struct dir
+{
+    char* dir_name;
+    dmlist_context_t* files;
+    dmlist_context_t* dirs;
+} dir_t;
+
+/**
+ * @brief File system context structure
+ */
+struct dmfsi_context
+{
+    uint32_t          magic;
+    dir_t*            root_dir;
+};
+
+
+// ============================================================================
+//                      Local Prototypes
+// ============================================================================
+static int              compare_file_name   (const void* a, const void* b);
+static int              compare_dir_name    (const void* a, const void* b);
+static file_t*          find_file           (dir_t* dir, dmfsi_path_t* path);
+static dir_t*           find_dir            (dir_t* dir, dmfsi_path_t* path);
+static file_t*          create_file         (dir_t* dir, dmfsi_path_t* path);
+static file_handle_t*   create_file_handle  (file_t* file, int mode, int attribute);
+
+
+// ============================================================================
+//                      Module Interface Implementation
+// ============================================================================
 /**
  * @brief Module initialization (optional)
  */
@@ -39,8 +100,14 @@ int dmod_deinit(void)
  */
 dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, dmfsi_context_t, _init, (const char* config) )
 {
-    // TODO: Initialize RAM file system
-    return NULL;
+    dmfsi_context_t ctx = Dmod_Malloc(sizeof(struct dmfsi_context));
+    if (ctx == NULL)
+    {
+        DMOD_LOG_ERROR("dmramfs: Failed to allocate memory for context\n");
+        return NULL;
+    }
+    ctx->magic = DMRAMFS_CONTEXT_MAGIC;
+    return ctx;
 }
 
 /**
@@ -48,8 +115,11 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, dmfsi_context_t, _init, (const cha
  */
 dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _deinit, (dmfsi_context_t ctx) )
 {
-    // TODO: Cleanup RAM file system
-    return DMFSI_ERR_GENERAL;
+    if (ctx)
+    {
+        Dmod_Free(ctx);
+    }
+    return DMFSI_OK;
 }
 
 /**
@@ -57,8 +127,7 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _deinit, (dmfsi_context_t ctx
  */
 dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _context_is_valid, (dmfsi_context_t ctx) )
 {
-    // TODO: Validate context
-    return 0;
+    return (ctx && ctx->magic == DMRAMFS_CONTEXT_MAGIC) ? 1 : 0;
 }
 
 /**
@@ -66,8 +135,42 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _context_is_valid, (dmfsi_con
  */
 dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _fopen, (dmfsi_context_t ctx, void** fp, const char* path, int mode, int attr) )
 {
-    // TODO: Implement file open
-    return DMFSI_ERR_GENERAL;
+    if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
+    {
+        DMOD_LOG_ERROR("dmramfs: Invalid context in fopen\n");
+        return DMFSI_ERR_INVALID;
+    }
+
+    dmfsi_path_t* p = dmfsi_path_create(path);
+    if (p == NULL)
+    {
+        DMOD_LOG_ERROR("dmramfs: Invalid path in fopen: '%s'\n", path);
+        return DMFSI_ERR_INVALID;
+    }
+    file_t* file = find_file(ctx->root_dir, p);
+    
+    if (file == NULL)
+    {
+        bool can_create = (mode & DMFSI_O_CREAT) != 0 || (mode & DMFSI_O_WRONLY) != 0;
+        file = can_create ? create_file(ctx->root_dir, p) : NULL;
+        if(file == NULL)
+        {
+            DMOD_LOG_ERROR("dmramfs: File not found and cannot be created: '%s'\n", path);
+            dmfsi_path_free(p);
+            return DMFSI_ERR_NOT_FOUND;
+        }
+    }
+    dmfsi_path_free(p);
+
+    file_handle_t* handle = create_file_handle(file, mode, attr);
+    if (handle == NULL)
+    {
+        DMOD_LOG_ERROR("dmramfs: Failed to allocate memory for file handle\n");
+        return DMFSI_ERR_GENERAL;
+    }
+
+    *fp = handle;
+    return DMFSI_OK;
 }
 
 /**
@@ -277,4 +380,171 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _direxists, (dmfsi_context_t 
 {
     // TODO: Implement directory existence check
     return 0;
+}
+
+// ============================================================================
+//                      Local Functions
+// ============================================================================
+
+/**
+ * @brief Compare file path with a given path
+ */
+static int compare_file_name(const void* file, const void* file_name)
+{
+    const file_t* file_a = (const file_t*)file;
+    const char* path_b = (const char*)file_name;
+    return strcmp(file_a->file_name, path_b);
+}
+
+/**
+ * @brief Compare directory name with a given name
+ */
+static int compare_dir_name(const void* a, const void* b)
+{
+    const dir_t* dir_a = (const dir_t*)a;
+    const char* name_b = (const char*)b;
+    // Assuming dir_t has a 'dir_name' member for comparison
+    return strcmp(dir_a->dir_name, name_b);
+}
+
+/**
+ * @brief Find a file by its path
+ */
+static file_t* find_file(dir_t* dir, dmfsi_path_t* path)
+{
+    if(path->filename != NULL)
+    {
+        file_t* file = dmlist_find(dir->files, path->filename, compare_file_name);
+        if(file == NULL)
+        {
+            dir_t* subdir = dmlist_find(dir->dirs, path->filename, compare_dir_name);
+            if(subdir != NULL)
+            {
+                DMOD_LOG_ERROR("dmramfs: Path '%s' is a directory, not a file\n", path->filename);
+            }
+            else 
+            {
+                DMOD_LOG_ERROR("dmramfs: File '%s' not found in path\n", path->filename);
+            }
+        }
+    }
+    else if(path->directory != NULL)
+    {
+        dir_t* subdir = dmlist_find(dir->dirs, path->directory, compare_dir_name);
+        if(subdir != NULL && path->next != NULL)
+        {
+            return find_file(subdir, path->next);
+        }
+        else 
+        {
+            DMOD_LOG_ERROR("dmramfs: Directory '%s' not found in path\n", path->directory);
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief Find a directory by its path
+ */
+static dir_t* find_dir(dir_t* dir, dmfsi_path_t* path)
+{
+    if(path->directory != NULL)
+    {
+        dir_t* subdir = dmlist_find(dir->dirs, path->directory, compare_dir_name);
+        if(subdir != NULL)
+        {
+            if(path->next != NULL)
+            {
+                return find_dir(subdir, path->next);
+            }
+            else 
+            {
+                return subdir;
+            }
+        }
+        else 
+        {
+            DMOD_LOG_ERROR("dmramfs: Directory '%s' not found in path\n", path->directory);
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief Create a file at the specified path
+ * 
+ * @param dir   The starting directory
+ * @param path  The path to create the file at
+ * 
+ * @return file_t*  Pointer to the created file, or NULL on failure
+ */
+static file_t* create_file(dir_t* dir, dmfsi_path_t* path)
+{
+    if(path->filename != NULL)
+    {
+        file_t* file = Dmod_Malloc(sizeof(file_t));
+        if(file == NULL)
+        {
+            DMOD_LOG_ERROR("dmramfs: Failed to allocate memory for new file '%s'\n", path->filename);
+            return NULL;
+        }
+        file->file_name = dmfsi_strndup(path->filename, strlen(path->filename));
+        file->data = NULL;
+        file->size = 0;
+        file->handles = dmlist_create(DMOD_MODULE_NAME);
+        if(dmlist_insert(dir->files, 0, file) != 0)
+        {
+            DMOD_LOG_ERROR("dmramfs: Failed to insert new file '%s' into directory\n", path->filename);
+            Dmod_Free(file->file_name);
+            Dmod_Free(file);
+            return NULL;
+        }
+        return file;
+    }
+    else if(path->directory != NULL)
+    {
+        dir_t* subdir = dmlist_find(dir->dirs, path->directory, compare_dir_name);
+        if(subdir == NULL)
+        {
+            DMOD_LOG_ERROR("dmramfs: Directory '%s' not found in path for file creation\n", path->directory);
+            return NULL;
+        }
+        if(path->next != NULL)
+        {
+            return create_file(subdir, path->next);
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief Create a file handle for the specified file
+ * 
+ * @param file      The file to create a handle for
+ * @param mode      The mode to open the file with
+ * @param attribute The attributes for the file handle
+ * 
+ * @return file_handle_t*  Pointer to the created file handle, or NULL on failure
+ */
+static file_handle_t* create_file_handle(file_t* file, int mode, int attribute)
+{
+    file_handle_t* handle = Dmod_Malloc(sizeof(file_handle_t));
+    if (handle == NULL)
+    {
+        DMOD_LOG_ERROR("dmramfs: Failed to allocate memory for file handle\n");
+        return NULL;
+    }
+
+    handle->file = file;
+    handle->mode = mode;
+    handle->attribute = attribute;
+
+    if(!dmlist_push_back(file->handles, handle))
+    {
+        DMOD_LOG_ERROR("dmramfs: Failed to add handle to file's handle list\n");
+        Dmod_Free(handle);
+        return NULL;
+    }
+
+    return handle;
 }
