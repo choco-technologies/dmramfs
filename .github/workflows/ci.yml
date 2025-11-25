@@ -17,7 +17,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Build dmffs project
+      - name: Build dmramfs project
         run: |
           mkdir -p build
           cd build
@@ -31,24 +31,6 @@ jobs:
           cmake ../build/_deps/dmod-src -DDMOD_MODE=DMOD_SYSTEM
           cmake --build . --target dmod_loader
       
-      - name: Prepare test filesystem
-        run: |
-          mkdir -p /tmp/flashfs/subdir
-          echo "Hello from DMFFS!" > /tmp/flashfs/hello.txt
-          echo "Test file 1" > /tmp/flashfs/test1.txt
-          echo "File in subdirectory" > /tmp/flashfs/subdir/nested.txt
-          echo "Config data" > /tmp/flashfs/config.cfg
-          echo "Test filesystem created:"
-          find /tmp/flashfs -type f -exec echo "  {}" \;
-      
-      - name: Create filesystem image with make_dmffs
-        run: |
-          ./build_dmod/examples/system/dmod_loader/dmod_loader \
-            ./build/dmf/make_dmffs.dmf \
-            --args /tmp/flashfs /tmp/flash-fs.ffs
-          echo "Filesystem image created:"
-          ls -lh /tmp/flash-fs.ffs
-      
       - name: Clone and build dmvfs
         run: |
           cd /tmp
@@ -56,18 +38,13 @@ jobs:
           cd dmvfs
           mkdir build
           cd build
-          cmake .. -DDMOD_MODE=DMOD_SYSTEM -DDMOD_MEMORY="08080000:/tmp/flash-fs.ffs" -DDMVFS_BUILD_TESTS=ON
+          cmake .. -DDMOD_MODE=DMOD_SYSTEM -DDMVFS_BUILD_TESTS=ON
           cmake --build .
           echo "dmvfs built successfully, fs_tester available at:"
           ls -lh ./tests/fs_tester
       
       - name: Run filesystem tests
         run: |
-          export FLASH_FS_ADDR="0x08080000"
-          export FLASH_FS_SIZE="0x1000"
-          echo "Running filesystem tests in read-only mode..."
-          /tmp/dmvfs/build/tests/fs_tester --read-only-fs \
-            --test-file /mnt/hello.txt \
-            --test-dir /mnt \
-            ./build/dmf/dmffs.dmf
+          echo "Running filesystem tests for dmramfs..."
+          /tmp/dmvfs/build/tests/fs_tester ./build/dmf/dmramfs.dmf
           echo "Filesystem test completed successfully"
