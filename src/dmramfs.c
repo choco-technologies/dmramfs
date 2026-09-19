@@ -1275,7 +1275,7 @@ static file_t* create_file(dir_t* dir, dmfsi_path_t* path)
         file->file_name = dmfsi_strndup(path->filename, strlen(path->filename));
         file->data = NULL;
         file->size = 0;
-        file->handles = dmlist_create(DMOD_MODULE_NAME);
+        file->handles = dmlist_create();
         if(!dmlist_insert(dir->files, 0, file))
         {
             DMOD_LOG_ERROR("dmramfs: Failed to insert new file '%s' into directory\n", path->filename);
@@ -1373,8 +1373,8 @@ static dir_t* create_root_dir(void)
     }
 
     root->dir_name = dmfsi_strndup("/", 1);
-    root->files = dmlist_create(DMOD_MODULE_NAME);
-    root->dirs = dmlist_create(DMOD_MODULE_NAME);
+    root->files = dmlist_create();
+    root->dirs = dmlist_create();
 
     if (root->dir_name == NULL || root->files == NULL || root->dirs == NULL)
     {
@@ -1436,8 +1436,8 @@ static dir_t* create_dir(dir_t* parent, dmfsi_path_t* path)
         }
 
         new_dir->dir_name = dmfsi_strndup(name, strlen(name));
-        new_dir->files = dmlist_create(DMOD_MODULE_NAME);
-        new_dir->dirs = dmlist_create(DMOD_MODULE_NAME);
+        new_dir->files = dmlist_create();
+        new_dir->dirs = dmlist_create();
 
         if (new_dir->dir_name == NULL || new_dir->files == NULL || new_dir->dirs == NULL)
         {
@@ -1475,8 +1475,8 @@ static dir_t* create_dir(dir_t* parent, dmfsi_path_t* path)
             }
 
             subdir->dir_name = dmfsi_strndup(name, strlen(name));
-            subdir->files = dmlist_create(DMOD_MODULE_NAME);
-            subdir->dirs = dmlist_create(DMOD_MODULE_NAME);
+            subdir->files = dmlist_create();
+            subdir->dirs = dmlist_create();
 
             if (!dmlist_insert(parent->dirs, 0, subdir))
             {
