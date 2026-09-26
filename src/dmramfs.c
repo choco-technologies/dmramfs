@@ -14,23 +14,23 @@
 /** 
  * @brief File structure
  */
-typedef struct 
+typedef struct
 {
     char* file_name;
     void* data;
-    size_t size;
+    dmfsi_size_t size;
     dmlist_context_t* handles;
 } file_t;
 
-/** 
+/**
  * @brief File handle structure
  */
-typedef struct 
+typedef struct
 {
     file_t* file;
     int mode;
     int attribute;
-    size_t position;    // Current read/write position
+    dmfsi_offset_t position;    // Current read/write position
 } file_handle_t;
 
 /** 
@@ -259,13 +259,14 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _fread, (dmfsi_context_t ctx,
     }
     
     // Calculate how much we can read
-    size_t available = (handle->position < file->size) ? (file->size - handle->position) : 0;
+    dmfsi_size_t position = (dmfsi_size_t)handle->position;
+    size_t available = (position < file->size) ? (size_t)(file->size - position) : 0;
     size_t to_read = (size < available) ? size : available;
-    
+
     if (to_read > 0)
     {
-        memcpy(buffer, (char*)file->data + handle->position, to_read);
-        handle->position += to_read;
+        memcpy(buffer, (char*)file->data + position, to_read);
+        handle->position += (dmfsi_offset_t)to_read;
     }
     
     if (read) *read = to_read;
@@ -298,46 +299,54 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _fwrite, (dmfsi_context_t ctx
         return DMFSI_ERR_INVALID;
     }
     
-    // Calculate new size needed
-    size_t end_position = handle->position + size;
-    
+    dmfsi_size_t position = (dmfsi_size_t)handle->position;
+
+    // Calculate new size needed, guarding against overflow instead of wrapping
+    if (size > (size_t)(UINT64_MAX - position))
+    {
+        DMOD_LOG_ERROR("dmramfs: Write would overflow file size\n");
+        if (written) *written = 0;
+        return DMFSI_ERR_INVALID;
+    }
+    dmfsi_size_t end_position = position + size;
+
     // Resize the file data buffer if needed
     if (end_position > file->size)
     {
-        void* new_data = Dmod_Malloc(end_position);
+        void* new_data = Dmod_Malloc((size_t)end_position);
         if (new_data == NULL)
         {
             DMOD_LOG_ERROR("dmramfs: Failed to allocate memory for file data\n");
             if (written) *written = 0;
             return DMFSI_ERR_GENERAL;
         }
-        
+
         // Copy existing data if any
         if (file->data && file->size > 0)
         {
-            memcpy(new_data, file->data, file->size);
+            memcpy(new_data, file->data, (size_t)file->size);
         }
-        
+
         // Zero-fill gap between old size and current position
-        if (handle->position > file->size)
+        if (position > file->size)
         {
-            memset((char*)new_data + file->size, 0, handle->position - file->size);
+            memset((char*)new_data + file->size, 0, (size_t)(position - file->size));
         }
-        
+
         // Free old data
         if (file->data)
         {
             Dmod_Free(file->data);
         }
-        
+
         file->data = new_data;
         file->size = end_position;
     }
-    
+
     // Write the data
-    memcpy((char*)file->data + handle->position, buffer, size);
-    handle->position += size;
-    
+    memcpy((char*)file->data + position, buffer, size);
+    handle->position += (dmfsi_offset_t)size;
+
     if (written) *written = size;
     return DMFSI_OK;
 }
@@ -345,44 +354,44 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _fwrite, (dmfsi_context_t ctx
 /**
  * @brief Seek to a position in a file
  */
-dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, long, _lseek, (dmfsi_context_t ctx, void* fp, long offset, int whence) )
+dmod_dmfsi_dif_api_declaration( 2.0, dmramfs, dmfsi_offset_t, _lseek, (dmfsi_context_t ctx, void* fp, dmfsi_offset_t offset, int whence) )
 {
     if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
     {
         DMOD_LOG_ERROR("dmramfs: Invalid context in lseek\n");
         return -1;
     }
-    
+
     if (fp == NULL)
     {
         return -1;
     }
-    
+
     file_handle_t* handle = (file_handle_t*)fp;
     file_t* file = handle->file;
-    long new_position;
-    
+    dmfsi_offset_t new_position;
+
     switch (whence)
     {
         case DMFSI_SEEK_SET:
             new_position = offset;
             break;
         case DMFSI_SEEK_CUR:
-            new_position = (long)handle->position + offset;
+            new_position = handle->position + offset;
             break;
         case DMFSI_SEEK_END:
-            new_position = (file ? (long)file->size : 0) + offset;
+            new_position = (dmfsi_offset_t)(file ? file->size : 0) + offset;
             break;
         default:
             return -1;
     }
-    
+
     if (new_position < 0)
     {
         return -1;
     }
-    
-    handle->position = (size_t)new_position;
+
+    handle->position = new_position;
     return new_position;
 }
 
@@ -422,11 +431,11 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _getc, (dmfsi_context_t ctx, 
     file_handle_t* handle = (file_handle_t*)fp;
     file_t* file = handle->file;
     
-    if (file == NULL || file->data == NULL || handle->position >= file->size)
+    if (file == NULL || file->data == NULL || (dmfsi_size_t)handle->position >= file->size)
     {
         return -1;  // EOF
     }
-    
+
     unsigned char c = ((unsigned char*)file->data)[handle->position];
     handle->position++;
     return (int)c;
@@ -462,20 +471,20 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _putc, (dmfsi_context_t ctx, 
 /**
  * @brief Get current file position
  */
-dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, long, _tell, (dmfsi_context_t ctx, void* fp) )
+dmod_dmfsi_dif_api_declaration( 2.0, dmramfs, dmfsi_offset_t, _tell, (dmfsi_context_t ctx, void* fp) )
 {
     if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
     {
         return -1;
     }
-    
+
     if (fp == NULL)
     {
         return -1;
     }
-    
+
     file_handle_t* handle = (file_handle_t*)fp;
-    return (long)handle->position;
+    return handle->position;
 }
 
 /**
@@ -501,33 +510,33 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _eof, (dmfsi_context_t ctx, v
         return 1;  // Empty file is at EOF
     }
     
-    return (handle->position >= file->size) ? 1 : 0;
+    return ((dmfsi_size_t)handle->position >= file->size) ? 1 : 0;
 }
 
 /**
  * @brief Get file size
  */
-dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, long, _size, (dmfsi_context_t ctx, void* fp) )
+dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, dmfsi_size_t, _size, (dmfsi_context_t ctx, void* fp) )
 {
     if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
     {
-        return -1;
+        return 0;
     }
-    
+
     if (fp == NULL)
     {
-        return -1;
+        return 0;
     }
-    
+
     file_handle_t* handle = (file_handle_t*)fp;
     file_t* file = handle->file;
-    
+
     if (file == NULL)
     {
         return 0;
     }
-    
-    return (long)file->size;
+
+    return file->size;
 }
 
 /**
@@ -651,7 +660,7 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _closedir, (dmfsi_context_t c
 /**
  * @brief Read directory entry
  */
-dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _readdir, (dmfsi_context_t ctx, void* dp, dmfsi_dir_entry_t* entry) )
+dmod_dmfsi_dif_api_declaration( 2.0, dmramfs, int, _readdir, (dmfsi_context_t ctx, void* dp, dmfsi_dir_entry_t* entry) )
 {
     if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
     {
@@ -680,7 +689,7 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _readdir, (dmfsi_context_t ct
         {
             strncpy(entry->name, file->file_name, sizeof(entry->name) - 1);
             entry->name[sizeof(entry->name) - 1] = '\0';
-            entry->size = (uint32_t)file->size;
+            entry->size = file->size;
             entry->attr = 0;  // Regular file
             entry->time = 0;
             handle->file_index++;
@@ -712,7 +721,7 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _readdir, (dmfsi_context_t ct
 /**
  * @brief Get file/directory statistics
  */
-dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _stat, (dmfsi_context_t ctx, const char* path, dmfsi_stat_t* stat) )
+dmod_dmfsi_dif_api_declaration( 2.0, dmramfs, int, _stat, (dmfsi_context_t ctx, const char* path, dmfsi_stat_t* stat) )
 {
     if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
     {
@@ -753,7 +762,7 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _stat, (dmfsi_context_t ctx, 
     file_t* file = find_file(ctx->root_dir, p);
     if (file != NULL)
     {
-        stat->size = (uint32_t)file->size;
+        stat->size = file->size;
         stat->attr = 0;  // Regular file
         stat->ctime = 0;
         stat->mtime = 0;
@@ -1345,7 +1354,7 @@ static file_handle_t* create_file_handle(file_t* file, int mode, int attribute)
     // Handle append mode - start at end of file
     if ((mode & DMFSI_O_APPEND) && file != NULL)
     {
-        handle->position = file->size;
+        handle->position = (dmfsi_offset_t)file->size;
     }
 
     if(!dmlist_push_back(file->handles, handle))
