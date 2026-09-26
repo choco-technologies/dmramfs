@@ -660,7 +660,7 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _closedir, (dmfsi_context_t c
 /**
  * @brief Read directory entry
  */
-dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _readdir, (dmfsi_context_t ctx, void* dp, dmfsi_dir_entry_t* entry) )
+dmod_dmfsi_dif_api_declaration( 2.0, dmramfs, int, _readdir, (dmfsi_context_t ctx, void* dp, dmfsi_dir_entry_t* entry) )
 {
     if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
     {
@@ -721,7 +721,7 @@ dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _readdir, (dmfsi_context_t ct
 /**
  * @brief Get file/directory statistics
  */
-dmod_dmfsi_dif_api_declaration( 1.0, dmramfs, int, _stat, (dmfsi_context_t ctx, const char* path, dmfsi_stat_t* stat) )
+dmod_dmfsi_dif_api_declaration( 2.0, dmramfs, int, _stat, (dmfsi_context_t ctx, const char* path, dmfsi_stat_t* stat) )
 {
     if(dmfsi_dmramfs_context_is_valid(ctx) == 0)
     {
